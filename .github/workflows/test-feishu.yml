@@ -1,0 +1,20 @@
+name: Test Feishu
+
+on:
+  workflow_dispatch:
+
+jobs:
+  send-message:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send message to Feishu
+        run: |
+          curl -X POST "${{ secrets.FEISHU_WEBHOOK }}" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "msg_type":"text",
+            "content":{
+              "text":"AI_AGENT\n你好徐伦，这是你的第一个Github Agent消息。"
+            }
+          }'

@@ -48,26 +48,69 @@ function formatPublished(isoString) {
   });
 }
 
-function buildPrompt(title, published, link) {
-  return `请根据下面Youtube财经视频的信息：
+function buildPrompt() {
+  return `
+请认真观看并理解视频内容。
 
-标题：
-${title}
+你是一名资深宏观研究员和投资分析师。
 
-发布时间：
-${published}
+不要复述视频。
 
-链接：
-${link}
+请直接提炼价值。
 
-推测视频讨论主题，并输出：
+按照以下格式输出：
 
-1. 可能讨论的问题
-2. 相关投资领域
-3. 值得关注的风险
-4. 长期投资者应该重点关注什么
+# 视频标题
 
-控制在300字以内`;
+# 三句话总结
+
+用三句话告诉我作者最重要的观点。
+
+# 核心数据
+
+列出视频中最重要的5个数据。
+
+格式：
+
+- 数据
+- 意义
+- 对市场影响
+
+# 作者的核心逻辑
+
+作者为什么得出这个结论？
+
+核心推理链是什么？
+
+# 投资启示
+
+利好哪些行业？
+
+利空哪些行业？
+
+哪些行业值得继续观察？
+
+# 审计视角
+
+作者的分析有哪些假设？
+
+哪些地方可能错？
+
+有哪些反例？
+
+# 一句话结论
+
+如果我只有10秒钟时间，
+
+最值得记住的一句话是什么？
+
+要求：
+
+不要废话。
+不要重复视频内容。
+不要超过800字。
+使用中文。
+`;
 }
 
 async function fetchLatestVideo() {
@@ -87,7 +130,7 @@ async function fetchLatestVideo() {
   };
 }
 
-async function callGemini(prompt) {
+async function callGemini(videoLink, prompt) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     {
@@ -98,7 +141,15 @@ async function callGemini(prompt) {
       body: JSON.stringify({
         contents: [
           {
-            parts: [{ text: prompt }],
+            parts: [
+              {
+                fileData: {
+                  fileUri: videoLink,
+                  mimeType: "video/mp4",
+                },
+              },
+              { text: prompt },
+            ],
           },
         ],
       }),
@@ -159,11 +210,11 @@ async function main() {
   console.log(`发布时间：\n${published}\n`);
   console.log(`视频链接：\n${link}\n`);
 
-  const prompt = buildPrompt(title, published, link);
+  const prompt = buildPrompt();
 
-  console.log("正在调用 Gemini 分析视频...\n");
+  console.log("正在将视频链接发送给 Gemini 分析...\n");
 
-  const analysis = await callGemini(prompt);
+  const analysis = await callGemini(link, prompt);
 
   console.log(analysis);
   console.log();

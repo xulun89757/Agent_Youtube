@@ -1,0 +1,60 @@
+name: YouTube Agent
+
+on:
+  schedule:
+    # 每天 UTC 01:00 = 北京时间 09:00
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Log workflow info
+        run: |
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Run ID: ${{ github.run_id }}"
+          echo "Trigger: ${{ github.event_name }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Start time (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Log Node.js version
+        run: |
+          node --version
+          npm --version
+
+      - name: Verify secrets are configured
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          if [ -z "$GEMINI_API_KEY" ]; then
+            echo "错误: GEMINI_API_KEY 未在 GitHub Secrets 中配置"
+            exit 1
+          fi
+          if [ -z "$FEISHU_WEBHOOK" ]; then
+            echo "错误: FEISHU_WEBHOOK 未在 GitHub Secrets 中配置"
+            exit 1
+          fi
+          echo "Secrets 校验通过"
+
+      - name: Run YouTube Agent
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: node agent.js
+
+      - name: Log completion
+        if: always()
+        run: |
+          echo "End time (UTC): $(date -u '+%Y-%m-%d %H:%M:%S')"
+          echo "Job status: ${{ job.status }}"

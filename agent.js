@@ -1,8 +1,37 @@
+const fs = require("fs/promises");
+const path = require("path");
+
 const RSS_URL =
   "https://www.youtube.com/feeds/videos.xml?channel_id=UC8gZZWIWmBuCb_gzC8DUrvw";
 
+const LAST_VIDEO_FILE = path.join(__dirname, "last_video.txt");
+
 const apiKey = process.env.GEMINI_API_KEY;
 const feishuWebhook = process.env.FEISHU_WEBHOOK;
+
+function extractVideoId(link) {
+  const watchMatch = link.match(/[?&]v=([^&]+)/);
+  if (watchMatch) return watchMatch[1];
+
+  const shortMatch = link.match(/youtu\.be\/([^?&]+)/);
+  if (shortMatch) return shortMatch[1];
+
+  throw new Error(`无法从链接提取视频 ID：${link}`);
+}
+
+async function readLastVideoId() {
+  try {
+    const content = await fs.readFile(LAST_VIDEO_FILE, "utf8");
+    return content.trim();
+  } catch (err) {
+    if (err.code === "ENOENT") return "";
+    throw err;
+  }
+}
+
+async function writeLastVideoId(videoId) {
+  await fs.writeFile(LAST_VIDEO_FILE, videoId, "utf8");
+}
 
 function decodeHtmlEntities(str) {
   return str
@@ -205,10 +234,18 @@ async function main() {
   console.log("正在获取老厉害财经频道最新视频...\n");
 
   const { title, published, link } = await fetchLatestVideo();
+  const videoId = extractVideoId(link);
+  const lastVideoId = await readLastVideoId();
 
   console.log(`最新视频标题：\n${title}\n`);
   console.log(`发布时间：\n${published}\n`);
   console.log(`视频链接：\n${link}\n`);
+  console.log(`视频 ID：${videoId}\n`);
+
+  if (lastVideoId === videoId) {
+    console.log("无新视频，停止推送");
+    process.exit(0);
+  }
 
   const prompt = buildPrompt();
 
@@ -221,7 +258,10 @@ async function main() {
 
   await sendToFeishu(analysis);
 
+  await writeLastVideoId(videoId);
+
   console.log("消息已发送到飞书");
+  console.log(`已更新 ${path.basename(LAST_VIDEO_FILE)}：${videoId}`);
 }
 
 main().catch((err) => {

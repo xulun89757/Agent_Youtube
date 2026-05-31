@@ -1,8 +1,15 @@
+const title = "测试标题";
+const published = "测试时间";
+const link = "测试链接";
+
 const apiKey = process.env.GEMINI_API_KEY;
 const feishuWebhook = process.env.FEISHU_WEBHOOK;
 
-const PROMPT =
-  "请给正在学习AI开发的徐伦一句100字以内的鼓励和建议";
+const PROMPT = `请根据以下 YouTube 视频信息，输出简洁的视频分析（含主题概括、核心观点、适合人群，300字以内）：
+
+标题：${title}
+发布时间：${published}
+链接：${link}`;
 
 async function generateAndSend() {
   if (!apiKey) {

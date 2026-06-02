@@ -143,7 +143,13 @@ function buildPrompt() {
 }
 
 async function fetchLatestVideo() {
-  const response = await fetch(RSS_URL);
+  const response = await fetch(RSS_URL, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/136.0 Safari/537.36",
+      Accept: "application/xml,text/xml,*/*",
+    },
+  });
 
   if (!response.ok) {
     throw new Error(`获取 RSS 失败：HTTP ${response.status}`);

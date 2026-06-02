@@ -150,8 +150,14 @@ async function fetchLatestVideo() {
       Accept: "application/xml,text/xml,*/*",
     },
   });
-
+  
   if (!response.ok) {
+    const text = await response.text();
+  
+    console.error("状态码:", response.status);
+    console.error("返回内容:");
+    console.error(text);
+  
     throw new Error(`获取 RSS 失败：HTTP ${response.status}`);
   }
 

@@ -1,8 +1,18 @@
 const fs = require("fs/promises");
 const path = require("path");
 
-const RSS_URL =
-  "https://www.youtube.com/feeds/videos.xml?channel_id=UC8gZZWIWmBuCb_gzC8DUrvw";
+const CHANNEL_ID = "UC8gZZWIWmBuCb_gzC8DUrvw";
+const CHANNEL_VIDEOS_URL = `https://www.youtube.com/channel/${CHANNEL_ID}/videos`;
+const RSS_URLS = [
+  `https://www.youtube.com/feeds/videos.xml?channel_id=${CHANNEL_ID}`,
+  `https://www.youtube.com/feeds/videos.xml?playlist_id=UU${CHANNEL_ID.slice(2)}`,
+];
+
+const FETCH_HEADERS = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  Accept: "application/xml,text/xml,application/xhtml+xml,text/html;q=0.9,*/*;q=0.8",
+};
 
 const LAST_VIDEO_FILE = path.join(__dirname, "last_video.txt");
 
@@ -142,32 +152,174 @@ function buildPrompt() {
 `;
 }
 
-async function fetchLatestVideo() {
-  const response = await fetch(RSS_URL, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/136.0 Safari/537.36",
-      Accept: "application/xml,text/xml,*/*",
-    },
-  });
-  
-  if (!response.ok) {
-    const text = await response.text();
-  
-    console.error("状态码:", response.status);
-    console.error("返回内容:");
-    console.error(text);
-  
-    throw new Error(`获取 RSS 失败：HTTP ${response.status}`);
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchRssXml(url, retries = 4) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const response = await fetch(url, { headers: FETCH_HEADERS });
+
+    if (response.ok) {
+      const xml = await response.text();
+      if (xml.includes("<entry>")) return xml;
+    }
+
+    if (
+      attempt < retries &&
+      (response.status === 404 || response.status === 500)
+    ) {
+      const delay = attempt * 5000;
+      console.log(
+        `RSS 返回 HTTP ${response.status}，${delay / 1000}s 后重试 (${attempt}/${retries})...`
+      );
+      await sleep(delay);
+      continue;
+    }
+
+    console.error(`RSS 请求失败：${url} (HTTP ${response.status})`);
+    break;
   }
 
-  const xml = await response.text();
-  const { title, published, link } = parseLatestEntry(xml);
+  return null;
+}
+
+async function fetchLatestVideoFromRss() {
+  for (const url of RSS_URLS) {
+    console.log(`尝试 RSS：${url}`);
+    const xml = await fetchRssXml(url);
+    if (xml) {
+      console.log("RSS 获取成功\n");
+      return parseLatestEntry(xml);
+    }
+  }
+  return null;
+}
+
+async function fetchLatestVideoFromYouTubeApi() {
+  const youtubeApiKey = process.env.YOUTUBE_API_KEY;
+  if (!youtubeApiKey) return null;
+
+  console.log("RSS 不可用，尝试 YouTube Data API...\n");
+
+  const channelRes = await fetch(
+    `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${CHANNEL_ID}&key=${youtubeApiKey}`
+  );
+  const channelData = await channelRes.json();
+
+  if (!channelRes.ok) {
+    console.error("YouTube API 获取频道失败：", channelData);
+    return null;
+  }
+
+  const uploadsPlaylistId =
+    channelData.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+
+  if (!uploadsPlaylistId) return null;
+
+  const playlistRes = await fetch(
+    `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=1&key=${youtubeApiKey}`
+  );
+  const playlistData = await playlistRes.json();
+
+  if (!playlistRes.ok) {
+    console.error("YouTube API 获取视频列表失败：", playlistData);
+    return null;
+  }
+
+  const snippet = playlistData.items?.[0]?.snippet;
+  if (!snippet?.resourceId?.videoId) return null;
+
+  console.log("YouTube Data API 获取成功\n");
 
   return {
-    title,
-    published: formatPublished(published),
-    link,
+    title: snippet.title,
+    published: snippet.publishedAt,
+    link: `https://www.youtube.com/watch?v=${snippet.resourceId.videoId}`,
+  };
+}
+
+async function fetchLatestVideoFromChannelPage() {
+  console.log("改从频道页面获取最新视频...\n");
+
+  const response = await fetch(CHANNEL_VIDEOS_URL, { headers: FETCH_HEADERS });
+
+  if (!response.ok) {
+    throw new Error(`获取频道页面失败：HTTP ${response.status}`);
+  }
+
+  const html = await response.text();
+  const match = html.match(/var ytInitialData = (.+?);<\/script>/);
+
+  if (!match) {
+    throw new Error("无法解析频道页面数据");
+  }
+
+  const data = JSON.parse(match[1]);
+  let result = null;
+
+  function walk(obj) {
+    if (result || !obj || typeof obj !== "object") return;
+
+    const vm = obj.lockupViewModel;
+    const title = vm?.lockupMetadataViewModel?.title?.content;
+    const videoId = (JSON.stringify(vm || {}).match(
+      /vi\/([a-zA-Z0-9_-]{11})\//
+    ) || [])[1];
+
+    if (title && videoId) {
+      const metadataRows =
+        vm.lockupMetadataViewModel?.metadata?.contentMetadataViewModel
+          ?.metadataRows?.[0]?.metadataParts || [];
+      const published =
+        metadataRows.find((part) => part.accessibilityLabel)
+          ?.accessibilityLabel ||
+        metadataRows[1]?.text?.content ||
+        "未知";
+
+      result = {
+        title,
+        published,
+        link: `https://www.youtube.com/watch?v=${videoId}`,
+      };
+      return;
+    }
+
+    for (const value of Object.values(obj)) {
+      walk(value);
+    }
+  }
+
+  walk(data);
+
+  if (!result) {
+    throw new Error("无法从频道页面解析最新视频");
+  }
+
+  console.log("频道页面获取成功\n");
+  return result;
+}
+
+async function fetchLatestVideo() {
+  let video = await fetchLatestVideoFromRss();
+
+  if (!video) {
+    video = await fetchLatestVideoFromYouTubeApi();
+  }
+
+  if (!video) {
+    video = await fetchLatestVideoFromChannelPage();
+  }
+
+  const published =
+    video.published.includes("T") || video.published.endsWith("Z")
+      ? formatPublished(video.published)
+      : video.published;
+
+  return {
+    title: video.title,
+    published,
+    link: video.link,
   };
 }
 

@@ -8,6 +8,19 @@ const RSS_URLS = [
   `https://www.youtube.com/feeds/videos.xml?playlist_id=UU${CHANNEL_ID.slice(2)}`,
 ];
 
+const CHANNELS = [
+  {
+    name: "老厉害财经",
+    channelId: "UC8gZZWIWmBuCb_gzC8DUrvw",
+    promptType: "macro",
+  },
+  {
+    name: "感知",
+    channelId: "UCiStSOhmu94BskBJ_2lm98w",
+    promptType: "ganzhi",
+  },
+];
+
 const FETCH_HEADERS = {
   "User-Agent":
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -15,6 +28,7 @@ const FETCH_HEADERS = {
 };
 
 const LAST_VIDEO_FILE = path.join(__dirname, "last_video.txt");
+const LAST_VIDEOS_FILE = path.join(__dirname, "last_videos.json");
 
 const apiKey = process.env.GEMINI_API_KEY;
 const feishuWebhook = process.env.FEISHU_WEBHOOK;
@@ -41,6 +55,25 @@ async function readLastVideoId() {
 
 async function writeLastVideoId(videoId) {
   await fs.writeFile(LAST_VIDEO_FILE, videoId, "utf8");
+}
+async function loadLastVideos() {
+  try {
+    const content = await fs.readFile(LAST_VIDEOS_FILE, "utf8");
+    return JSON.parse(content);
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      return {};
+    }
+    throw err;
+  }
+}
+
+async function saveLastVideos(data) {
+  await fs.writeFile(
+    LAST_VIDEOS_FILE,
+    JSON.stringify(data, null, 2),
+    "utf8"
+  );
 }
 
 function decodeHtmlEntities(str) {
@@ -87,7 +120,14 @@ function formatPublished(isoString) {
   });
 }
 
-function buildPrompt() {
+function buildRssUrls(channelId) {
+  return [
+    `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`,
+    `https://www.youtube.com/feeds/videos.xml?playlist_id=UU${channelId.slice(2)}`,
+  ];
+}
+
+function buildMacroPrompt() {
   return `
 请认真观看并理解视频内容。
 
@@ -152,6 +192,64 @@ function buildPrompt() {
 `;
 }
 
+function buildGanzhiPrompt() {
+  return `
+请认真观看并理解视频内容。
+
+你是一名专业内容分析师。
+
+不要复述视频。
+
+请提炼最有价值的信息。
+
+按照以下格式输出：
+
+# 视频标题
+
+# 三句话总结
+
+# 核心观点
+
+列出作者最重要的5个观点。
+
+# 底层逻辑
+
+作者为什么这样判断？
+
+# 值得关注的信息
+
+哪些信息最值得后续持续跟踪？
+
+# 审计视角
+
+作者可能忽略了什么？
+
+有哪些潜在反例？
+
+# 一句话结论
+
+要求：
+
+不要废话。
+不要重复视频内容。
+不要超过800字。
+使用中文。
+`;
+}
+
+function getPrompt(type) {
+  switch (type) {
+    case "macro":
+      return buildMacroPrompt();
+
+    case "ganzhi":
+      return buildGanzhiPrompt();
+
+    default:
+      return buildMacroPrompt();
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -184,8 +282,10 @@ async function fetchRssXml(url, retries = 4) {
   return null;
 }
 
-async function fetchLatestVideoFromRss() {
-  for (const url of RSS_URLS) {
+async function fetchLatestVideoFromRss(channelId) {
+  const rssUrls = buildRssUrls(channelId);
+
+  for (const url of rssUrls) {
     console.log(`尝试 RSS：${url}`);
     const xml = await fetchRssXml(url);
     if (xml) {
@@ -196,14 +296,14 @@ async function fetchLatestVideoFromRss() {
   return null;
 }
 
-async function fetchLatestVideoFromYouTubeApi() {
+async function fetchLatestVideoFromYouTubeApi(channelId) {
   const youtubeApiKey = process.env.YOUTUBE_API_KEY;
   if (!youtubeApiKey) return null;
 
   console.log("RSS 不可用，尝试 YouTube Data API...\n");
 
   const channelRes = await fetch(
-    `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${CHANNEL_ID}&key=${youtubeApiKey}`
+    `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${channelId}&key=${youtubeApiKey}`
   );
   const channelData = await channelRes.json();
 
@@ -239,10 +339,11 @@ async function fetchLatestVideoFromYouTubeApi() {
   };
 }
 
-async function fetchLatestVideoFromChannelPage() {
+async function fetchLatestVideoFromChannelPage(channelId) {
   console.log("改从频道页面获取最新视频...\n");
 
-  const response = await fetch(CHANNEL_VIDEOS_URL, { headers: FETCH_HEADERS });
+  const channelVideosUrl = `https://www.youtube.com/channel/${channelId}/videos`;
+  const response = await fetch(channelVideosUrl, { headers: FETCH_HEADERS });
 
   if (!response.ok) {
     throw new Error(`获取频道页面失败：HTTP ${response.status}`);
@@ -300,15 +401,15 @@ async function fetchLatestVideoFromChannelPage() {
   return result;
 }
 
-async function fetchLatestVideo() {
-  let video = await fetchLatestVideoFromRss();
+async function fetchLatestVideo(channelId) {
+  let video = await fetchLatestVideoFromRss(channelId);
 
   if (!video) {
-    video = await fetchLatestVideoFromYouTubeApi();
+    video = await fetchLatestVideoFromYouTubeApi(channelId);
   }
 
   if (!video) {
-    video = await fetchLatestVideoFromChannelPage();
+    video = await fetchLatestVideoFromChannelPage(channelId);
   }
 
   const published =
@@ -363,7 +464,7 @@ async function callGemini(videoLink, prompt) {
   return text;
 }
 
-async function sendToFeishu(text) {
+async function sendToFeishu(text, channelName) {
   const response = await fetch(feishuWebhook, {
     method: "POST",
     headers: {
@@ -372,7 +473,7 @@ async function sendToFeishu(text) {
     body: JSON.stringify({
       msg_type: "text",
       content: {
-        text: `AI_AGENT\n\n${text}`,
+        text: `【${channelName}】\n\n${text}`,
       },
     }),
   });
@@ -395,37 +496,43 @@ async function main() {
     process.exit(1);
   }
 
-  console.log("正在获取老厉害财经频道最新视频...\n");
+  const lastVideos = await loadLastVideos();
 
-  const { title, published, link } = await fetchLatestVideo();
-  const videoId = extractVideoId(link);
-  const lastVideoId = await readLastVideoId();
+  for (const channel of CHANNELS) {
+    console.log(`正在获取 ${channel.name} 频道最新视频...\n`);
 
-  console.log(`最新视频标题：\n${title}\n`);
-  console.log(`发布时间：\n${published}\n`);
-  console.log(`视频链接：\n${link}\n`);
-  console.log(`视频 ID：${videoId}\n`);
+    const { title, published, link } = await fetchLatestVideo(
+      channel.channelId
+    );
 
-  if (lastVideoId === videoId) {
-    console.log("无新视频，停止推送");
-    process.exit(0);
+    const videoId = extractVideoId(link);
+    const lastVideoId = lastVideos[channel.channelId] || "";
+
+    console.log(`最新视频标题：\n${title}\n`);
+    console.log(`发布时间：\n${published}\n`);
+    console.log(`视频链接：\n${link}\n`);
+    console.log(`视频 ID：${videoId}\n`);
+
+    if (lastVideoId === videoId) {
+      console.log(`${channel.name} 无新视频，跳过\n`);
+      continue;
+    }
+
+    const prompt = getPrompt(channel.promptType);
+
+    console.log("正在将视频链接发送给 Gemini 分析...\n");
+
+    const analysis = await callGemini(link, prompt);
+
+    console.log(analysis);
+    console.log();
+    await sendToFeishu(analysis, channel.name);
+
+    lastVideos[channel.channelId] = videoId;
+    await saveLastVideos(lastVideos);
+
+    console.log(`消息已发送到飞书（${channel.name}）`);
   }
-
-  const prompt = buildPrompt();
-
-  console.log("正在将视频链接发送给 Gemini 分析...\n");
-
-  const analysis = await callGemini(link, prompt);
-
-  console.log(analysis);
-  console.log();
-
-  await sendToFeishu(analysis);
-
-  await writeLastVideoId(videoId);
-
-  console.log("消息已发送到飞书");
-  console.log(`已更新 ${path.basename(LAST_VIDEO_FILE)}：${videoId}`);
 }
 
 main().catch((err) => {

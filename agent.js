@@ -1,12 +1,6 @@
 const fs = require("fs/promises");
 const path = require("path");
 
-const CHANNEL_ID = "UC8gZZWIWmBuCb_gzC8DUrvw";
-const CHANNEL_VIDEOS_URL = `https://www.youtube.com/channel/${CHANNEL_ID}/videos`;
-const RSS_URLS = [
-  `https://www.youtube.com/feeds/videos.xml?channel_id=${CHANNEL_ID}`,
-  `https://www.youtube.com/feeds/videos.xml?playlist_id=UU${CHANNEL_ID.slice(2)}`,
-];
 
 const CHANNELS = [
   {
@@ -27,7 +21,6 @@ const FETCH_HEADERS = {
   Accept: "application/xml,text/xml,application/xhtml+xml,text/html;q=0.9,*/*;q=0.8",
 };
 
-const LAST_VIDEO_FILE = path.join(__dirname, "last_video.txt");
 const LAST_VIDEOS_FILE = path.join(__dirname, "last_videos.json");
 
 const apiKey = process.env.GEMINI_API_KEY;
@@ -43,22 +36,12 @@ function extractVideoId(link) {
   throw new Error(`无法从链接提取视频 ID：${link}`);
 }
 
-async function readLastVideoId() {
-  try {
-    const content = await fs.readFile(LAST_VIDEO_FILE, "utf8");
-    return content.trim();
-  } catch (err) {
-    if (err.code === "ENOENT") return "";
-    throw err;
-  }
-}
-
-async function writeLastVideoId(videoId) {
-  await fs.writeFile(LAST_VIDEO_FILE, videoId, "utf8");
-}
 async function loadLastVideos() {
   try {
     const content = await fs.readFile(LAST_VIDEOS_FILE, "utf8");
+    if (!content.trim()) {
+      return {};
+    }
     return JSON.parse(content);
   } catch (err) {
     if (err.code === "ENOENT") {

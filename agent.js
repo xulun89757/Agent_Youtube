@@ -43,6 +43,7 @@ async function loadLastVideos() {
       return {};
     }
     return JSON.parse(content);
+    
   } catch (err) {
     if (err.code === "ENOENT") {
       return {};

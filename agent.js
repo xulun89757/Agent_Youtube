@@ -1,7 +1,6 @@
 const fs = require("fs/promises");
 const path = require("path");
 
-
 const CHANNELS = [
   {
     name: "老厉害财经",
@@ -113,110 +112,105 @@ function buildRssUrls(channelId) {
 
 function buildMacroPrompt() {
   return `
-请认真观看并理解视频内容。
+请认真理解视频内容。
 
-你是一名资深宏观研究员和投资分析师。
+你是一名资深宏观研究员。
 
-不要复述视频。
+不要复述视频内容。
 
-请直接提炼价值。
+只提炼最重要的信息。
 
 按照以下格式输出：
 
-# 视频标题
+# 核心观点
 
-# 三句话总结
+列出3条最重要结论。
 
-用三句话告诉我作者最重要的观点。
+每条不超过30字。
 
-# 核心数据
+# 关键数据
 
-列出视频中最重要的5个数据。
+最多3个。
 
 格式：
 
 - 数据
-- 意义
-- 对市场影响
+- 为什么重要
 
-# 作者的核心逻辑
+# 核心逻辑
 
-作者为什么得出这个结论？
+作者的推理链是什么？
 
-核心推理链是什么？
+100字以内。
 
-# 投资启示
+# 投资影响
 
-利好哪些行业？
+利好：
 
-利空哪些行业？
+利空：
 
-哪些行业值得继续观察？
+观察：
 
-# 审计视角
+每项最多2条。
 
-作者的分析有哪些假设？
+# 审计
 
-哪些地方可能错？
+作者最可能错在哪里？
 
-有哪些反例？
+50字以内。
 
 # 一句话结论
 
-如果我只有10秒钟时间，
-
-最值得记住的一句话是什么？
+30字以内。
 
 要求：
 
+总字数控制在400字以内。
+
 不要废话。
 不要重复视频内容。
-不要超过800字。
 使用中文。
 `;
 }
 
 function buildGanzhiPrompt() {
   return `
-请认真观看并理解视频内容。
+请认真理解视频内容。
 
-你是一名专业内容分析师。
+你是一名内容分析师。
 
-不要复述视频。
+不要复述视频内容。
 
-请提炼最有价值的信息。
+只提炼最重要的信息。
 
 按照以下格式输出：
 
-# 视频标题
-
-# 三句话总结
-
 # 核心观点
 
-列出作者最重要的5个观点。
+列出3条最重要观点。
+
+每条不超过30字。
 
 # 底层逻辑
 
 作者为什么这样判断？
 
-# 值得关注的信息
+100字以内。
 
-哪些信息最值得后续持续跟踪？
+# 值得关注
 
-# 审计视角
-
-作者可能忽略了什么？
-
-有哪些潜在反例？
+未来最值得跟踪的3个信号。
 
 # 一句话结论
 
+30字以内。
+
 要求：
+
+总字数控制在300字以内。
 
 不要废话。
 不要重复视频内容。
-不要超过800字。
 使用中文。
 `;
 }
@@ -232,6 +226,67 @@ function getPrompt(type) {
     default:
       return buildMacroPrompt();
   }
+}
+
+async function saveAnalysisToMarkdown(
+  channelName,
+  title,
+  published,
+  link,
+  analysis
+) {
+  const channelDir = path.join(
+    __dirname,
+    "outputs",
+    channelName
+  );
+
+  await fs.mkdir(channelDir, {
+    recursive: true,
+  });
+
+  const timestamp = new Date()
+  .toISOString()
+  .replace(/[:T]/g, "-")
+  .slice(0, 19);
+
+  const safeTitle = title
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .slice(0, 30);
+
+    const fileName =
+  `${timestamp}-${safeTitle}.md`;
+
+    const filePath = path.join(
+      channelDir,
+      fileName
+    );
+    
+    const markdown = `# 视频信息
+    频道：${channelName}
+    标题：${title}
+    发布时间：${published}
+    
+    视频链接：
+    ${link}
+    
+    采集时间：
+    ${new Date().toLocaleString("zh-CN")}
+    
+    ---
+    
+    # AI分析
+    
+    ${analysis}
+    `;
+    
+    await fs.writeFile(
+      filePath,
+      markdown,
+      "utf8"
+    );
+    
+    console.log(`Markdown 已保存：${filePath}`);
 }
 
 function sleep(ms) {
@@ -483,6 +538,7 @@ async function main() {
   const lastVideos = await loadLastVideos();
 
   for (const channel of CHANNELS) {
+    try {
     console.log(`正在获取 ${channel.name} 频道最新视频...\n`);
 
     const { title, published, link } = await fetchLatestVideo(
@@ -510,12 +566,27 @@ async function main() {
 
     console.log(analysis);
     console.log();
+    
+    await saveAnalysisToMarkdown(
+      channel.name,
+      title,
+      published,
+      link,
+      analysis
+    );
+    
     await sendToFeishu(analysis, channel.name);
-
+    
     lastVideos[channel.channelId] = videoId;
     await saveLastVideos(lastVideos);
 
     console.log(`消息已发送到飞书（${channel.name}）`);
+    } catch (err) {
+      console.error(
+        `${channel.name} 处理失败：`,
+        err.message
+      );
+    }
   }
 }
 

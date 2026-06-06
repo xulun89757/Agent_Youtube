@@ -122,6 +122,8 @@ function buildMacroPrompt() {
 
 按照以下格式输出：
 
+# 视频标题
+
 # 核心观点
 
 列出3条最重要结论。
@@ -184,6 +186,8 @@ function buildGanzhiPrompt() {
 只提炼最重要的信息。
 
 按照以下格式输出：
+
+# 视频标题
 
 # 核心观点
 

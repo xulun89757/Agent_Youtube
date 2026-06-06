@@ -29,8 +29,9 @@ jobs:
 
       - name: Log last video record
         run: |
-          if [ -f last_video.txt ] && [ -s last_video.txt ]; then
-            echo "上次记录的视频 ID: $(cat last_video.txt)"
+          if [ -f last_videos.json ] && [ -s last_videos.json ]; then
+            echo "上次记录的视频 ID:"
+            cat last_videos.json
           else
             echo "尚无上次视频记录"
           fi
@@ -67,29 +68,29 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
         run: node agent.js
 
-      - name: Commit and push last_video.txt
+      - name: Commit and push last_videos.json
         if: success()
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ ! -f last_video.txt ]; then
-            echo "last_video.txt 不存在，跳过提交"
+          if [ ! -f last_videos.json ]; then
+            echo "last_videos.json 不存在，跳过提交"
             exit 0
           fi
 
-          if git diff --quiet HEAD -- last_video.txt; then
-            echo "last_video.txt 无变化，跳过提交"
+          if git diff --quiet HEAD -- last_videos.json; then
+            echo "last_videos.json 无变化，跳过提交"
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add last_video.txt
-          git commit -m "chore: update last_video.txt"
+          git add last_videos.json
+          git commit -m "chore: update last_videos.json"
           git push origin HEAD:${{ github.ref_name }}
 
-          echo "last_video.txt 已提交并推送到远程仓库"
+          echo "last_videos.json 已提交并推送到远程仓库"
 
       - name: Log completion
         if: always()

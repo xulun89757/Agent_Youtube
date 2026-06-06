@@ -467,44 +467,75 @@ async function fetchLatestVideo(channelId) {
   };
 }
 
-async function callGemini(videoLink, prompt) {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
+function parseGeminiRetryDelay(data) {
+  const details = data?.error?.details || [];
+  for (const detail of details) {
+    if (detail["@type"]?.includes("RetryInfo") && detail.retryDelay) {
+      const match = String(detail.retryDelay).match(/(\d+)/);
+      if (match) return Number(match[1]) * 1000;
+    }
+  }
+
+  const message = data?.error?.message || "";
+  const retryMatch = message.match(/retry in ([\d.]+)s/i);
+  if (retryMatch) {
+    return Math.ceil(Number(retryMatch[1]) * 1000);
+  }
+
+  return null;
+}
+
+async function callGemini(videoLink, prompt, maxRetries = 4) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+  const body = {
+    contents: [
+      {
+        parts: [
+          {
+            fileData: {
+              fileUri: videoLink,
+              mimeType: "video/mp4",
+            },
+          },
+          { text: prompt },
+        ],
+      },
+    ],
+  };
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                fileData: {
-                  fileUri: videoLink,
-                  mimeType: "video/mp4",
-                },
-              },
-              { text: prompt },
-            ],
-          },
-        ],
-      }),
+      body: JSON.stringify(body),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) {
+        throw new Error(`未获取到有效回复：${JSON.stringify(data)}`);
+      }
+      return text;
     }
-  );
 
-  const data = await response.json();
+    const isRateLimited =
+      response.status === 429 || data?.error?.code === 429;
 
-  if (!response.ok) {
+    if (isRateLimited && attempt < maxRetries) {
+      const retryDelay = parseGeminiRetryDelay(data) ?? attempt * 10000;
+      console.log(
+        `Gemini 配额限制，${Math.ceil(retryDelay / 1000)}s 后重试 (${attempt}/${maxRetries})...`
+      );
+      await sleep(retryDelay);
+      continue;
+    }
+
     throw new Error(`Gemini API 错误：${JSON.stringify(data)}`);
   }
-
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error(`未获取到有效回复：${JSON.stringify(data)}`);
-  }
-
-  return text;
 }
 
 async function sendToFeishu(text, channelName) {

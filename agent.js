@@ -467,24 +467,6 @@ async function fetchLatestVideo(channelId) {
   };
 }
 
-function parseGeminiRetryDelay(data) {
-  const details = data?.error?.details || [];
-  for (const detail of details) {
-    if (detail["@type"]?.includes("RetryInfo") && detail.retryDelay) {
-      const match = String(detail.retryDelay).match(/(\d+)/);
-      if (match) return Number(match[1]) * 1000;
-    }
-  }
-
-  const message = data?.error?.message || "";
-  const retryMatch = message.match(/retry in ([\d.]+)s/i);
-  if (retryMatch) {
-    return Math.ceil(Number(retryMatch[1]) * 1000);
-  }
-
-  return null;
-}
-
 async function callGemini(videoLink, prompt, maxRetries = 4) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   const body = {
@@ -526,9 +508,9 @@ async function callGemini(videoLink, prompt, maxRetries = 4) {
       response.status === 429 || data?.error?.code === 429;
 
     if (isRateLimited && attempt < maxRetries) {
-      const retryDelay = parseGeminiRetryDelay(data) ?? attempt * 10000;
+      const retryDelay = 2 * 60 * 1000;
       console.log(
-        `Gemini 配额限制，${Math.ceil(retryDelay / 1000)}s 后重试 (${attempt}/${maxRetries})...`
+        `Gemini 配额限制，2 分钟后重试 (${attempt}/${maxRetries})...`
       );
       await sleep(retryDelay);
       continue;
